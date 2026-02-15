@@ -65,7 +65,7 @@ export default function FinancialHealth() {
 
     useEffect(() => {
         async function fetchBankInfo() {
-            const response = await fetch("http://localhost:8000/balances")
+            const response = await fetch("/api/balances")
             const data = await response.json()
 
             console.log(data)
@@ -146,13 +146,6 @@ export default function FinancialHealth() {
                     {/* Non-Negotiable Spending */}
                     <div className="bg-blue-50 rounded-xl p-5 cursor-pointer select-none" onClick={() => setShowNonNegotiable(!showNonNegotiable)}>
                         <p className="text-lg text-blue-700 font-medium">Non-Negotiable Spending</p>
-                        <p className="text-4xl font-bold text-blue-900">
-                            ${formatter.format(
-                                activeNonNegotiableLimit !== undefined && activeNonNegotiableLimit < bankInfo.nonNegotiableBank
-                                    ? activeNonNegotiableLimit - bankInfo.nonNegotiableCC
-                                    : bankInfo.nonNegotiableSpending
-                            )}
-                        </p>
                         <SemiCircleChart
                             bank={bankInfo.nonNegotiableBank}
                             spent={bankInfo.nonNegotiableCC}
@@ -160,6 +153,14 @@ export default function FinancialHealth() {
                             spentColor="rgba(239, 68, 68, 0.8)"
                             remainingColor="rgba(59, 130, 246, 0.8)"
                         />
+                        <p className="text-4xl font-bold text-blue-900">
+                            ${formatter.format(
+                                activeNonNegotiableLimit !== undefined && activeNonNegotiableLimit < bankInfo.nonNegotiableBank
+                                    ? activeNonNegotiableLimit - bankInfo.nonNegotiableCC
+                                    : bankInfo.nonNegotiableSpending
+                            )}
+                        </p>
+
                         {showNonNegotiable && (
                             <div className="mt-3 pt-3 border-t border-blue-200 space-y-2">
                                 <div className="flex justify-between text-sm">
