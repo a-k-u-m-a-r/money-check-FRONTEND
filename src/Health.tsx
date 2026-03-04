@@ -14,6 +14,16 @@ export default function FinancialHealth() {
 
     const [showPersonal, setShowPersonal] = useState(false)
     const [showNonNegotiable, setShowNonNegotiable] = useState(false)
+    const [showDatePicker, setShowDatePicker] = useState(false)
+
+    const [fromDate, setFromDate] = useState<string>(() => {
+        return localStorage.getItem("fromDate") || ""
+    })
+    const updateFromDate = (val: string) => {
+        setFromDate(val)
+        if (val) localStorage.setItem("fromDate", val)
+        else localStorage.removeItem("fromDate")
+    }
 
     const [personalLimit, setPersonalLimit] = useState<number | undefined>(() => {
         const saved = localStorage.getItem("personalLimit")
@@ -59,39 +69,82 @@ export default function FinancialHealth() {
         personalSpending: 0,
         personalBank: 0,
         personalCC: 0,
+        personalPosNeg: 0,
         nonNegotiableSpending: 0,
         nonNegotiableBank: 0,
         nonNegotiableCC: 0,
+        nonNegotiablePosNeg: 0,
     })
 
     useEffect(() => {
         async function fetchBankInfo() {
-            const response = await fetch("/api/balances")
+            setLoading(true)
+            const url = fromDate ? `/api/balances?from_date=${fromDate}` : "/api/balances"
+            const response = await fetch(url)
             const data = await response.json()
 
             console.log(data)
             const sumValues = (arr: Record<string, number>[]) =>
                 arr.reduce((total, item) => total + Object.values(item)[0], 0)
 
+            const sumPosNegSpending = (arr: Record<string, { acc_id: string; from_date: string; total_spending: number }>[]) =>
+                arr.reduce((total, item) => total + Object.values(item)[0].total_spending, 0)
+
+            const personalPosNeg = sumPosNegSpending(data["PERSONAL"]["pos_neg"] || [])
+            const personalBank = sumValues(data["PERSONAL"]["pos"])
+            const personalCC = sumValues(data["PERSONAL"]["neg"])
+
+            const nonNegotiablePosNeg = sumPosNegSpending(data["MANDATORY"]["pos_neg"] || [])
+            const nonNegotiableBank = sumValues(data["MANDATORY"]["pos"])
+            const nonNegotiableCC = sumValues(data["MANDATORY"]["neg"])
+
             setBankInfo({
-                personalSpending: data["PERSONAL"]["differential"],
-                personalBank: sumValues(data["PERSONAL"]["pos"]),
-                personalCC: sumValues(data["PERSONAL"]["neg"]),
-                nonNegotiableSpending: data["MANDATORY"]["differential"],
-                nonNegotiableBank: sumValues(data["MANDATORY"]["pos"]),
-                nonNegotiableCC: sumValues(data["MANDATORY"]["neg"]),
+                personalSpending: personalBank - personalCC,
+                personalBank: personalBank,
+                personalCC: personalCC,
+                personalPosNeg: personalPosNeg,
+                nonNegotiableSpending: nonNegotiableBank - nonNegotiableCC,
+                nonNegotiableBank: nonNegotiableBank,
+                nonNegotiableCC: nonNegotiableCC,
+                nonNegotiablePosNeg: nonNegotiablePosNeg,
             })
             setLoading(false)
         }
 
         fetchBankInfo()
-    }, []);
+    }, [fromDate]);
 
 
     return (
         <div className="min-h-screen p-8 flex items-center justify-center">
             <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-md">
-                <h2 className="text-2xl font-bold text-gray-800 mb-6">Health</h2>
+                <h2
+                    className="text-2xl font-bold text-gray-800 mb-4 cursor-pointer select-none"
+                    onClick={() => setShowDatePicker(!showDatePicker)}
+                >
+                    Health{fromDate && ` - ${new Date(fromDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                </h2>
+
+                {showDatePicker && (
+                    <div className="flex items-center gap-3 mb-6">
+                        <label className="text-sm text-gray-600">From Date</label>
+                        <input
+                            type="date"
+                            value={fromDate}
+                            max={new Date().toISOString().split("T")[0]}
+                            onChange={(e) => updateFromDate(e.target.value)}
+                            className="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-gray-400"
+                        />
+                        {fromDate && (
+                            <button
+                                onClick={() => updateFromDate("")}
+                                className="text-xs text-gray-400 hover:text-gray-600"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                )}
 
                 <div className="space-y-4">
                     {/* Personal Spending */}
@@ -104,16 +157,16 @@ export default function FinancialHealth() {
                         ) : (
                             <>
                                 <SemiCircleChart
-                                    bank={bankInfo.personalBank}
-                                    spent={bankInfo.personalCC}
+                                    bank={bankInfo.personalBank + bankInfo.personalPosNeg}
+                                    spent={bankInfo.personalCC + bankInfo.personalPosNeg}
                                     limit={activePersonalLimit}
                                     spentColor="rgba(239, 68, 68, 0.8)"
                                     remainingColor="rgba(59, 130, 246, 0.8)"
                                 />
                                 <p className="text-4xl font-bold text-emerald-900">
                                     ${formatter.format(
-                                        activePersonalLimit !== undefined && activePersonalLimit < bankInfo.personalBank
-                                            ? activePersonalLimit - bankInfo.personalCC
+                                        activePersonalLimit !== undefined && activePersonalLimit < bankInfo.personalBank + bankInfo.personalPosNeg
+                                            ? activePersonalLimit - bankInfo.personalCC - bankInfo.personalPosNeg
                                             : bankInfo.personalSpending
                                     )}
                                 </p>
@@ -122,12 +175,22 @@ export default function FinancialHealth() {
                                     <div className="mt-3 pt-3 border-t border-emerald-200 space-y-2">
                                         <div className="flex justify-between text-sm">
                                             <span className="text-emerald-600">Bank Balance</span>
-                                            <span className="font-medium text-emerald-800">${formatter.format(bankInfo.personalBank)}</span>
+                                            <span className="font-medium text-emerald-800">${formatter.format(bankInfo.personalBank + bankInfo.personalPosNeg)}</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-emerald-600">Credit Card Charges</span>
-                                            <span className="font-medium text-red-600">-${formatter.format(bankInfo.personalCC)}</span>
+                                            <span className="text-emerald-600">Total Spending</span>
+                                            <span className="font-medium text-red-600">-${formatter.format(bankInfo.personalCC + bankInfo.personalPosNeg)}</span>
                                         </div>
+                                        <div className="flex justify-between text-xs pl-3">
+                                            <span className="text-emerald-500">Credit Card Charges</span>
+                                            <span className="text-red-400">-${formatter.format(bankInfo.personalCC)}</span>
+                                        </div>
+                                        {bankInfo.personalPosNeg > 0 && (
+                                            <div className="flex justify-between text-xs pl-3">
+                                                <span className="text-emerald-500">Bank Account Spending</span>
+                                                <span className="text-red-400">-${formatter.format(bankInfo.personalPosNeg)}</span>
+                                            </div>
+                                        )}
                                         <div className="flex items-center justify-between text-sm" onClick={(e) => e.stopPropagation()}>
                                             <div className="flex items-center gap-2">
                                                 <button
@@ -163,16 +226,16 @@ export default function FinancialHealth() {
                         ) : (
                             <>
                                 <SemiCircleChart
-                                    bank={bankInfo.nonNegotiableBank}
-                                    spent={bankInfo.nonNegotiableCC}
+                                    bank={bankInfo.nonNegotiableBank + bankInfo.nonNegotiablePosNeg}
+                                    spent={bankInfo.nonNegotiableCC + bankInfo.nonNegotiablePosNeg}
                                     limit={activeNonNegotiableLimit}
                                     spentColor="rgba(239, 68, 68, 0.8)"
                                     remainingColor="rgba(59, 130, 246, 0.8)"
                                 />
                                 <p className="text-4xl font-bold text-blue-900">
                                     ${formatter.format(
-                                        activeNonNegotiableLimit !== undefined && activeNonNegotiableLimit < bankInfo.nonNegotiableBank
-                                            ? activeNonNegotiableLimit - bankInfo.nonNegotiableCC
+                                        activeNonNegotiableLimit !== undefined && activeNonNegotiableLimit < bankInfo.nonNegotiableBank + bankInfo.nonNegotiablePosNeg
+                                            ? activeNonNegotiableLimit - bankInfo.nonNegotiableCC - bankInfo.nonNegotiablePosNeg
                                             : bankInfo.nonNegotiableSpending
                                     )}
                                 </p>
@@ -181,12 +244,22 @@ export default function FinancialHealth() {
                                     <div className="mt-3 pt-3 border-t border-blue-200 space-y-2">
                                         <div className="flex justify-between text-sm">
                                             <span className="text-blue-600">Bank Balance</span>
-                                            <span className="font-medium text-blue-800">${formatter.format(bankInfo.nonNegotiableBank)}</span>
+                                            <span className="font-medium text-blue-800">${formatter.format(bankInfo.nonNegotiableBank + bankInfo.nonNegotiablePosNeg)}</span>
                                         </div>
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-blue-600">Credit Card Charges</span>
-                                            <span className="font-medium text-red-600">-${formatter.format(bankInfo.nonNegotiableCC)}</span>
+                                            <span className="text-blue-600">Total Spending</span>
+                                            <span className="font-medium text-red-600">-${formatter.format(bankInfo.nonNegotiableCC + bankInfo.nonNegotiablePosNeg)}</span>
                                         </div>
+                                        <div className="flex justify-between text-xs pl-3">
+                                            <span className="text-blue-500">Credit Card Charges</span>
+                                            <span className="text-red-400">-${formatter.format(bankInfo.nonNegotiableCC)}</span>
+                                        </div>
+                                        {bankInfo.nonNegotiablePosNeg > 0 && (
+                                            <div className="flex justify-between text-xs pl-3">
+                                                <span className="text-blue-500">Bank Account Spending</span>
+                                                <span className="text-red-400">-${formatter.format(bankInfo.nonNegotiablePosNeg)}</span>
+                                            </div>
+                                        )}
                                         <div className="flex items-center justify-between text-sm" onClick={(e) => e.stopPropagation()}>
                                             <div className="flex items-center gap-2">
                                                 <button
